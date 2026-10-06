@@ -1,121 +1,208 @@
-# kenAI — build and train a small language model
+# kenAI — building an LLM from scratch
 
-This project builds a small GPT from scratch: its weights start randomly, it learns to predict the next character, and it generates text using the weights you train. It uses PyTorch for tensor operations and automatic differentiation. There are no pretrained model weights or hosted AI APIs.
+An open project to learn how language models work by building and training one from the ground up. Start with text, turn it into tokens, build a Transformer, and teach it to predict what comes next.
 
-It follows the from-scratch direction of Green Code’s [“I Built an LLM from Scratch”](https://www.youtube.com/watch?v=s9w3gtgvNSU). It is a deliberately small first implementation, not a verified reproduction of the video’s model.
+Inspired by Green Code’s [**I Built an LLM from Scratch**](https://www.youtube.com/watch?v=s9w3gtgvNSU).
 
-You do not need your own dataset to begin. Start with the public Tiny Shakespeare practice corpus below. That model will learn patterns from Shakespeare; learning **your own writing style** requires examples of your writing later. This is an educational text-completion model, not a general-purpose chat assistant.
+The first milestone is a small GPT-style model that can train locally. Its weights start randomly, its character vocabulary comes from the dataset, and its predictions improve through training. PyTorch provides tensor operations and automatic differentiation; the tokenizer, attention mechanism, Transformer blocks, training loop, and generation pipeline are implemented in this repository.
 
-If `runs/shakespeare/best.pt` already exists in this copy, the initial setup and practice training have been done. Jump to section 3 to generate text. To train longer, set `--steps` above the saved step; to start over, choose a new `--out` folder. Existing runs are protected from accidental overwriting.
+## What we’re building
 
-The initial local run completed **2,000 steps** on Apple MPS with **826,368 parameters**. Validation loss improved from **4.2400 to 1.9931**. All **13 tests passed**, including saving, reloading, and resuming on CPU. The 4,837,888-parameter `studio` preset also passed a full-context forward/backward check on CPU; training it on the future 32 GB machine remains to be tried. These checks confirm the workflow works, not that the generated text is fluent. See `runs/shakespeare/sample.txt` for a sample and `runs/shakespeare/metrics.jsonl` for measurements.
+kenAI is a **decoder-only Transformer** that learns to continue text, one character at a time. It is a small starting point for understanding LLMs: the current implementation is an educational text generator, and useful conversation or personal writing style would require further data and training.
 
-## 1. Set up Python
+The project includes:
 
-Run these commands in the `kenAI` project folder. You need Python 3.12 installed; `python3.12 --version` checks that it is available.
+- A character tokenizer built from the input text.
+- Learned character and position embeddings.
+- Multi-head causal self-attention, feed-forward layers, and residual connections.
+- Training with next-character prediction and held-out validation.
+- Checkpoints for saving, loading, and continuing training.
+- Text generation with temperature and top-k sampling.
+- CPU, Apple Silicon MPS, and NVIDIA CUDA device selection.
 
-```bash
-python3.12 -m venv .venv
-.venv/bin/python -m pip install -r requirements.txt
+No pretrained weights are loaded when starting a new training run. The included demo checkpoint was trained with this project’s own code.
+
+## How it learns
+
+During training, each input character is paired with the character immediately after it:
+
+```text
+Text:     hello
+Input:    h e l l
+Target:   e l l o
 ```
 
-## 2. Download practice text and train
+The model turns character IDs into vectors, combines information from earlier positions through attention, and produces scores for the next character. A causal mask prevents it from reading future characters. Cross-entropy loss measures prediction error, and the optimizer adjusts the weights to reduce that error.
 
-```bash
-.venv/bin/python -m kenai.download
-.venv/bin/python -m kenai.train --data data/shakespeare.txt --out runs/shakespeare --steps 500
+```text
+Text → character IDs → character + position embeddings
+     → Transformer blocks → next-character scores → sampled character
 ```
 
-The download command saves [Tiny Shakespeare from Karpathy’s char-rnn repository](https://github.com/karpathy/char-rnn/blob/master/data/tinyshakespeare/input.txt) to `data/shakespeare.txt`. Downloading the corpus and installing dependencies require internet access; training and generation run locally.
+Generation repeats the last step: append a sampled character, feed the updated text back into the model, and continue.
 
-Start with the default `starter` preset on your current 16 GB machine. The first 500 steps are a practice run, not a promise of fluent output. A *step* is one update to the model after it predicts a batch of text.
+## Build your first model
 
-The trainer saves these files in `runs/shakespeare`:
+The commands below use Python 3.12 and a macOS/Linux shell. Run them from the project folder after cloning.
 
-- `latest.pt`: the most recently saved checkpoint, used to resume training.
-- `best.pt`: the checkpoint with the lowest measured validation loss.
-- `metrics.jsonl`: training and validation measurements, including initial and final evaluations.
-
-The final 10% of the corpus is a contiguous validation split; the earlier 90% is training text. Validation loss measures prediction error on held-out text, and lower is better. Because you use that split to choose checkpoints and settings, it is a development validation set. There is no separate final test set in this starter workflow.
-
-## 3. Generate text, then train longer
-
-```bash
-.venv/bin/python -m kenai.generate --checkpoint runs/shakespeare/best.pt --prompt 'ROMEO:' --tokens 400
-```
-
-Here, one token is one character, so `--tokens 400` generates 400 new characters. A prompt is text to continue. It must use characters present in the training corpus. Expect rough or repetitive text early in training.
-
-To continue the same run:
-
-```bash
-.venv/bin/python -m kenai.train --data data/shakespeare.txt --out runs/shakespeare --resume runs/shakespeare/latest.pt --steps 2000
-```
-
-`--steps` is the **total target**, not the number of additional steps. Resuming a checkpoint at step 500 with `--steps 2000` requests 1,500 more steps. If it is already at 2,000 steps, use a larger target such as `--steps 5000`. Keep the same corpus when resuming. Run commands from the project folder, or pass the correct corpus location with `--data`.
-
-## 4. Train on your own writing later
-
-Collect writing you want the model to imitate as UTF-8 `.txt` or `.md` files. Remove unwanted navigation, boilerplate, and pasted material. More varied, relevant writing gives the model more to learn; very small collections can be memorized.
-
-```bash
-.venv/bin/python -m kenai.prepare "/path/to/my-writing" --output data/my_style.txt
-.venv/bin/python -m kenai.train --data data/my_style.txt --out runs/my-style --steps 2000
-.venv/bin/python -m kenai.generate --checkpoint runs/my-style/best.pt --prompt 'I ' --tokens 400
-```
-
-Preparation combines the files and skips empty or exactly duplicated documents. Review `data/my_style.txt` before training. Use a new run for this corpus so you build its vocabulary and model from scratch. Without your own examples, the practice model cannot learn your personal style.
-
-## Hardware and settings
-
-`--device auto` selects an available accelerator (Apple MPS or NVIDIA CUDA), with CPU as the fallback. To choose CPU explicitly, add `--device cpu` to a training or generation command. `--threads 4` controls CPU threads and is the default. If memory is tight, try a smaller batch, such as `--batch-size 4`.
-
-| Preset | Context in characters | Embedding width | Attention heads | Transformer blocks | Default batch |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| `starter` (default) | 128 | 128 | 4 | 4 | 16 |
-| `studio` | 256 | 256 | 8 | 6 | 16 |
-
-After the smaller model works, you can try the optional `studio` preset on the planned M2 machine with 32 GB of memory:
-
-```bash
-.venv/bin/python -m kenai.train --data data/shakespeare.txt --out runs/shakespeare-studio --preset studio --steps 2000
-```
-
-This starts a new, larger model. A preset change does not enlarge an existing checkpoint. Even with 32 GB, this remains an educational model; building a capable general-purpose assistant requires substantially more data, compute, and training work.
-
-See all options with `.venv/bin/python -m kenai.train --help`. Training also accepts `--block-size`, `--learning-rate`, `--eval-every`, `--eval-batches`, and `--seed`.
-
-## Move the project to your next Mac
-
-Copy the project, including `data/` and `runs/` if you want to resume your training. Exclude `.venv/` and `__pycache__/` folders, then repeat the Python setup commands on the destination machine. Checkpoints save weights on CPU so they can be loaded onto another supported device. Run the resume command from the copied project folder using the same corpus and a larger total step target.
-
-Weights, optimizer state, vocabulary, and step count survive the move. Exact numerical reproduction across devices is not guaranteed; accelerator random-number state is not currently saved.
-
-The public Shakespeare corpus and the trained `runs/shakespeare/` checkpoint are included in Git. You can also transfer this starter project by cloning the repository on your next Mac:
+### 1. Set up the project
 
 ```bash
 git clone https://github.com/Yoken0/kenAI.git
 cd kenAI
 python3.12 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m kenai.generate --prompt 'ROMEO:' --tokens 400
 ```
 
-Other datasets and run folders are ignored by default. Copy those separately if you create personal training data or additional models later. The local Python environment and caches are excluded from Git and recreated by the setup commands.
+### 2. Get the training text
 
-## Learn how it works
-
-Read the code in this order:
-
-1. `kenai/tokenizer.py`: map each distinct character to a number and back.
-2. `kenai/model.py`: turn character and position embeddings into predictions through causal attention and feed-forward blocks, with residual connections and normalization. Causal attention prevents a position from reading future characters.
-3. `kenai/train.py`: predict the next character, measure cross-entropy loss, update weights, and evaluate on held-out text.
-4. `kenai/generate.py`: load your checkpoint and repeatedly sample the next character to extend a prompt.
-
-Run the project’s tests with:
+Start with [Tiny Shakespeare](https://github.com/karpathy/char-rnn/blob/master/data/tinyshakespeare/input.txt), a public practice corpus of approximately 1.1 million characters.
 
 ```bash
-.venv/bin/python -m unittest discover -s tests
+.venv/bin/python -m kenai.download
 ```
 
-For deeper study, the video’s description recommends [Stanford CS336](https://cs336.stanford.edu/), [Sebastian Raschka’s LLMs from Scratch](https://sebastianraschka.com/llms-from-scratch/), and [Andrej Karpathy’s videos](https://www.youtube.com/@AndrejKarpathy).
+The repository already includes this corpus at `data/shakespeare.txt`; the command keeps an existing file. Its source and checksum are recorded in [data/shakespeare.source.json](data/shakespeare.source.json). Dependencies and missing datasets require an internet connection; training and generation run locally.
+
+### 3. Train from random weights
+
+```bash
+.venv/bin/python -m kenai.train \
+  --data data/shakespeare.txt \
+  --out runs/first-model \
+  --steps 2000
+```
+
+This creates a **new model** in `runs/first-model`. It does not load the bundled checkpoint. Each step updates the weights using a batch of text. Expect rough output at first; 2,000 steps is a starting experiment, not a guarantee of fluent writing.
+
+The trainer uses the first 90% of the corpus for training and the final 10% for validation. These are separate, contiguous text segments. Watch validation loss to see whether predictions on held-out text improve. Because validation is used to select checkpoints, it is not a separate final test set.
+
+The run folder contains:
+
+| File | Purpose |
+| --- | --- |
+| `best.pt` | Model with the lowest measured validation loss; use it to generate text. |
+| `latest.pt` | Most recently saved model and optimizer state; use it to resume training. |
+| `metrics.jsonl` | Training and validation loss measurements. |
+
+Existing run folders are protected from overwriting. To start another experiment, choose a new `--out` folder. To continue this one, use `--resume`. Pressing `Ctrl+C` during training saves a checkpoint before stopping.
+
+### 4. Generate text
+
+```bash
+.venv/bin/python -m kenai.generate \
+  --checkpoint runs/first-model/best.pt \
+  --prompt "ROMEO:" \
+  --tokens 400 \
+  --temperature 0.8
+```
+
+One token is one character in this implementation. `--tokens 400` asks for 400 new characters after the prompt. Use prompt characters that exist in the training vocabulary.
+
+Lower temperatures, such as `0.6`, favor more probable characters. Higher temperatures, such as `1.0`, produce more varied output. `--top-k 20` limits each sampling step to the 20 highest-scoring candidates. Compare several prompts and settings alongside validation loss to understand what the model has learned.
+
+### 5. Keep training
+
+```bash
+.venv/bin/python -m kenai.train \
+  --resume runs/first-model/latest.pt \
+  --steps 5000
+```
+
+`--steps` is the **total target**. A checkpoint at step 2,000 needs 3,000 more updates to reach 5,000. Resume with the same corpus and architecture. To change the dataset or model size, start a new run.
+
+## Try the included model
+
+A trained example is included in `runs/shakespeare/` so you can try generation before running your own experiment:
+
+```bash
+.venv/bin/python -m kenai.generate \
+  --checkpoint runs/shakespeare/best.pt \
+  --prompt "ROMEO:" \
+  --tokens 400
+```
+
+This example has **826,368 parameters** and completed **2,000 training steps** on Apple MPS. Its validation loss fell from **4.2400 to 1.9931**. The output is still rough, with fragments of words and Shakespeare-like formatting rather than consistently coherent prose.
+
+See the [generated sample](runs/shakespeare/sample.txt) and [training measurements](runs/shakespeare/metrics.jsonl). The example demonstrates the training pipeline; it has not learned anyone’s personal writing style.
+
+## Use your own writing
+
+To experiment with a personal style, collect examples as UTF-8 `.txt` or `.md` files. Choose text representative of the writing you want to generate, and remove unwanted boilerplate or pasted material.
+
+```bash
+.venv/bin/python -m kenai.prepare "/path/to/my-writing" \
+  --output data/my_style.txt
+
+.venv/bin/python -m kenai.train \
+  --data data/my_style.txt \
+  --out runs/my-style \
+  --steps 2000
+
+.venv/bin/python -m kenai.generate \
+  --checkpoint runs/my-style/best.pt \
+  --prompt "I " \
+  --tokens 400
+```
+
+Preparation combines the documents and skips empty or exactly duplicated text. Review the combined corpus before training. More varied, relevant writing provides more examples to learn from; very small datasets can lead to memorization. See [the data guide](data/README.md) for preparation details.
+
+## Model sizes and hardware
+
+| Preset | Parameters with the Shakespeare vocabulary | Context in characters | Embedding width | Attention heads | Transformer blocks |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `starter` | 826,368 | 128 | 128 | 4 | 4 |
+| `studio` | 4,837,888 | 256 | 256 | 8 | 6 |
+
+`starter` is the default and was trained on an Apple Silicon Mac with 16 GB of memory. Both presets default to a batch size of 16. The larger `studio` preset is an optional next experiment for a machine such as an M2 Mac with 32 GB of memory:
+
+```bash
+.venv/bin/python -m kenai.train \
+  --data data/shakespeare.txt \
+  --out runs/studio-model \
+  --preset studio \
+  --steps 2000
+```
+
+The larger preset has passed a full-context forward/backward check on CPU; a full training run on the planned 32 GB machine has not been verified. Changing presets creates a new model. More memory allows larger experiments, while generation quality still depends on the data and training.
+
+`--device auto` selects CUDA when available, then Apple MPS, otherwise CPU. Use `--device cpu` to force CPU execution. Reduce `--batch-size`, for example to `4`, if memory is tight. `--threads 4` controls CPU threads and is the default.
+
+Explore the remaining settings with:
+
+```bash
+.venv/bin/python -m kenai.train --help
+.venv/bin/python -m kenai.generate --help
+```
+
+## Continue on another machine
+
+Clone the repository and recreate `.venv` using the setup commands. The public Shakespeare corpus and example checkpoints are included in Git, so the bundled model is ready to load after installing dependencies.
+
+For your own experiments, also copy the relevant corpus and run folder. Other datasets and run folders are ignored by Git by default. Run commands from the new project folder, or use `--data` to point to the moved corpus when resuming.
+
+Checkpoints store model weights, optimizer state, vocabulary, and step count. Tensors are saved on CPU so they can be loaded onto another supported device. A copied GPU checkpoint has been verified to resume on CPU in a different folder. Exact numerical reproduction across devices is not guaranteed; accelerator random-number state is not currently saved.
+
+## Explore the implementation
+
+| File | What to study |
+| --- | --- |
+| [tokenizer.py](kenai/tokenizer.py) | Building a vocabulary and converting between text and character IDs. |
+| [model.py](kenai/model.py) | Embeddings, attention, Transformer blocks, prediction loss, and sampling. |
+| [train.py](kenai/train.py) | Batching, optimization, validation, and checkpoints. |
+| [generate.py](kenai/generate.py) | Loading a trained model and continuing a prompt. |
+| [prepare.py](kenai/prepare.py) | Combining your writing into a training corpus. |
+
+The tests check causal attention, gradient flow, learning a small pattern, tokenizer round trips, checkpoint loading, CPU resumption, and corpus integrity.
+
+```bash
+.venv/bin/python -m unittest discover -s tests -v
+```
+
+## Inspiration and learning resources
+
+- [Green Code — I Built an LLM from Scratch](https://www.youtube.com/watch?v=s9w3gtgvNSU): the inspiration for this project.
+- [Andrej Karpathy’s char-rnn](https://github.com/karpathy/char-rnn): source of the Tiny Shakespeare practice corpus.
+- [Sebastian Raschka — Build a Large Language Model (From Scratch)](https://sebastianraschka.com/llms-from-scratch/).
+- [Stanford CS336 — Language Modeling from Scratch](https://cs336.stanford.edu/).
+- [Andrej Karpathy’s videos](https://www.youtube.com/@AndrejKarpathy).
