@@ -4,6 +4,8 @@ An open project to learn how language models work by building and training one f
 
 Inspired by Green Code’s [**I Built an LLM from Scratch**](https://www.youtube.com/watch?v=s9w3gtgvNSU).
 
+**Long-term objective:** train a model from scratch toward the original GPT-3’s level of capability. The [capability roadmap](ROADMAP.md) defines evaluation targets, development stages, data requirements, and compute estimates. The current implementation is the first prototype on that path.
+
 The first milestone is a small GPT-style model that can train locally. Its weights start randomly, its character vocabulary comes from the dataset, and its predictions improve through training. PyTorch provides tensor operations and automatic differentiation; the tokenizer, attention mechanism, Transformer blocks, training loop, and generation pipeline are implemented in this repository.
 
 ## What we’re building
